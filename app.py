@@ -320,6 +320,209 @@ def export_csv():
     )
 
 
+def _detect_resource_type(ocid):
+    """Detect OCI resource type from OCID prefix."""
+    if not ocid or ocid == "N/A":
+        return None
+    type_map = {
+        "instance": "compute",
+        "volume": "block_storage",
+        "bootvolumebackup": "block_storage",
+        "vcn": "network",
+        "subnetwork": "network",
+        "securitylist": "network",
+        "loadbalancer": "load_balancer",
+        "networkloadbalancer": "network_load_balancer",
+        "networkfirewall": "network_firewall",
+        "postgresqldbsystem": "postgresql",
+        "containerengine": "oke",
+        "dbcs": "database",
+        "database": "database",
+        "autonomousdatabase": "database",
+        "mounttarget": "file_storage",
+        "bucket": "object_storage",
+        "digitalink": "digital_assistant",
+        "analytics": "analytics",
+        "integration": "integration",
+        "streaming": "streaming",
+    }
+    ocid_lower = ocid.lower()
+    for prefix, rtype in type_map.items():
+        if f"ocid1.{prefix}." in ocid_lower:
+            return rtype
+    return None
+
+
+def _resource_action(resource_id, action):
+    """Execute start/stop/delete on an OCI resource."""
+    config = get_config()
+    rtype = _detect_resource_type(resource_id)
+
+    if not rtype:
+        return False, f"Cannot detect resource type from OCID"
+
+    compartment_id = None
+    # Extract compartment from OCID (3rd segment after ocid1.<type>.<region>.<compartment>)
+    parts = resource_id.split(".")
+    if len(parts) >= 4:
+        # The compartment hash is embedded, we need to find it via API
+        pass
+
+    try:
+        if rtype == "compute":
+            client = oci.core.ComputeClient(config)
+            if action == "start":
+                resp = client.instance_action(resource_id, "START")
+                return True, f"Instance starting..."
+            elif action == "stop":
+                resp = client.instance_action(resource_id, "STOP")
+                return True, f"Instance stopping..."
+            elif action == "delete":
+                resp = client.delete_instance(resource_id)
+                return True, f"Instance delete initiated..."
+
+        elif rtype == "postgresql":
+            if action == "delete":
+                # Need compartment_id for PostgreSQL
+                search_client = oci.resource_search.ResourceSearchClient(config)
+                sr = search_client.search_resources(
+                    search_details=oci.resource_search.models.FreeTextSearchDetails(text=resource_id)
+                )
+                if sr.data.items:
+                    comp_id = sr.data.items[0].compartment_id
+                    pg_client = oci.pdsql.PostgresqlClient(config)
+                    resp = pg_client.delete_db_system(comp_id, resource_id)
+                    return True, f"PostgreSQL delete initiated..."
+                return False, "Could not find compartment for PostgreSQL resource"
+            else:
+                return False, "PostgreSQL does not support start/stop"
+
+        elif rtype == "network_firewall":
+            if action == "delete":
+                search_client = oci.resource_search.ResourceSearchClient(config)
+                sr = search_client.search_resources(
+                    search_details=oci.resource_search.models.FreeTextSearchDetails(text=resource_id)
+                )
+                if sr.data.items:
+                    comp_id = sr.data.items[0].compartment_id
+                    fw_client = oci.network_firewall.NetworkFirewallClient(config)
+                    resp = fw_client.delete_network_firewall(comp_id, resource_id)
+                    return True, f"Network Firewall delete initiated..."
+                return False, "Could not find compartment"
+            else:
+                return False, "Network Firewall does not support start/stop"
+
+        elif rtype == "load_balancer":
+            if action == "delete":
+                search_client = oci.resource_search.ResourceSearchClient(config)
+                sr = search_client.search_resources(
+                    search_details=oci.resource_search.models.FreeTextSearchDetails(text=resource_id)
+                )
+                if sr.data.items:
+                    comp_id = sr.data.items[0].compartment_id
+                    lb_client = oci.load_balancer.LoadBalancerClient(config)
+                    resp = lb_client.delete_load_balancer(resource_id)
+                    return True, f"Load Balancer delete initiated..."
+                return False, "Could not find compartment"
+            else:
+                return False, "Load Balancer does not support start/stop"
+
+        elif rtype == "network_load_balancer":
+            if action == "delete":
+                search_client = oci.resource_search.ResourceSearchClient(config)
+                sr = search_client.search_resources(
+                    search_details=oci.resource_search.models.FreeTextSearchDetails(text=resource_id)
+                )
+                if sr.data.items:
+                    comp_id = sr.data.items[0].compartment_id
+                    nlb_client = oci.network_load_balancer.NetworkLoadBalancerClient(config)
+                    resp = nlb_client.delete_network_load_balancer(resource_id)
+                    return True, f"Network Load Balancer delete initiated..."
+                return False, "Could not find compartment"
+            else:
+                return False, "Network Load Balancer does not support start/stop"
+
+        elif rtype == "block_storage":
+            if action == "delete":
+                search_client = oci.resource_search.ResourceSearchClient(config)
+                sr = search_client.search_resources(
+                    search_details=oci.resource_search.models.FreeTextSearchDetails(text=resource_id)
+                )
+                if sr.data.items:
+                    comp_id = sr.data.items[0].compartment_id
+                    bs_client = oci.core.BlockstorageClient(config)
+                    resp = bs_client.delete_volume(resource_id)
+                    return True, f"Volume delete initiated..."
+                return False, "Could not find compartment"
+            else:
+                return False, "Block Storage does not support start/stop"
+
+        elif rtype == "network":
+            if action == "delete":
+                search_client = oci.resource_search.ResourceSearchClient(config)
+                sr = search_client.search_resources(
+                    search_details=oci.resource_search.models.FreeTextSearchDetails(text=resource_id)
+                )
+                if sr.data.items:
+                    comp_id = sr.data.items[0].compartment_id
+                    # Could be VCN or subnet
+                    if "vcn" in resource_id.lower():
+                        net_client = oci.core.VirtualNetworkClient(config)
+                        resp = net_client.delete_vcn(resource_id)
+                        return True, f"VCN delete initiated..."
+                    elif "subnetwork" in resource_id.lower():
+                        net_client = oci.core.VirtualNetworkClient(config)
+                        resp = net_client.delete_subnet(resource_id)
+                        return True, f"Subnet delete initiated..."
+                return False, "Could not determine network resource type"
+            else:
+                return False, "Network resources do not support start/stop"
+
+        elif rtype == "oke":
+            if action == "delete":
+                search_client = oci.resource_search.ResourceSearchClient(config)
+                sr = search_client.search_resources(
+                    search_details=oci.resource_search.models.FreeTextSearchDetails(text=resource_id)
+                )
+                if sr.data.items:
+                    comp_id = sr.data.items[0].compartment_id
+                    oke_client = oci.container_engine.ContainerEngineClient(config)
+                    resp = oke_client.delete_cluster(resource_id)
+                    return True, f"OKE Cluster delete initiated..."
+                return False, "Could not find compartment"
+            else:
+                return False, "OKE does not support start/stop via this tool"
+
+        elif rtype == "file_storage":
+            if action == "delete":
+                return False, "File Storage deletion not supported via this tool (use OCI Console)"
+            else:
+                return False, "File Storage does not support start/stop"
+
+        else:
+            return False, f"Resource type '{rtype}' actions not supported yet"
+
+    except oci.exceptions.ServiceError as e:
+        return False, f"OCI Error: {e.message}"
+    except Exception as e:
+        return False, f"Error: {str(e)}"
+
+    return False, "Unsupported action"
+
+
+@app.route("/api/resource/action", methods=["POST"])
+def api_resource_action():
+    data = request.get_json()
+    resource_id = data.get("resource_id", "")
+    action = data.get("action", "")
+
+    if not resource_id or action not in ("start", "stop", "delete"):
+        return jsonify({"success": False, "message": "Invalid parameters"})
+
+    success, message = _resource_action(resource_id, action)
+    return jsonify({"success": success, "message": message})
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("OCI Cost Dashboard")

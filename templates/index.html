@@ -16,6 +16,37 @@
         .controls button:hover { background: #00b4d8; color: #fff; }
         .controls button.active { background: #00b4d8; color: #fff; }
         .controls button.danger { background: #e74c3c; }
+
+        .action-btn { padding: 4px 8px; border-radius: 4px; border: none; font-size: 11px; cursor: pointer; margin-right: 2px; transition: opacity 0.2s; }
+        .action-btn:hover { opacity: 0.85; }
+        .action-btn.start { background: #27ae60; color: #fff; }
+        .action-btn.stop { background: #f39c12; color: #fff; }
+        .action-btn.delete { background: #e74c3c; color: #fff; }
+        .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .action-btn.loading { animation: pulse 1s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        .confirm-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+        .confirm-box { background: #253341; border: 1px solid #38444d; border-radius: 12px; padding: 28px 32px; max-width: 420px; width: 90%; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+        .confirm-box h3 { margin: 0 0 10px; color: #e1e8ed; font-size: 18px; }
+        .confirm-box p { margin: 0 0 20px; color: #8899a6; font-size: 13px; }
+        .confirm-box .res-id { font-size: 11px; color: #536a7a; word-break: break-all; background: #1c2b3a; padding: 6px 10px; border-radius: 6px; margin-bottom: 16px; display: inline-block; }
+        .confirm-box .actions { display: flex; gap: 10px; justify-content: center; }
+        .confirm-box .actions button { padding: 10px 28px; border-radius: 8px; border: none; font-size: 14px; cursor: pointer; font-weight: 600; }
+        .confirm-box .btn-cancel { background: #38444d; color: #8899a6; }
+        .confirm-box .btn-cancel:hover { background: #4a5a6a; }
+        .confirm-box .btn-danger { background: #e74c3c; color: #fff; }
+        .confirm-box .btn-danger:hover { background: #c0392b; }
+        .confirm-box .btn-start { background: #27ae60; color: #fff; }
+        .confirm-box .btn-start:hover { background: #219a52; }
+        .confirm-box .btn-stop { background: #f39c12; color: #fff; }
+        .confirm-box .btn-stop:hover { background: #e67e22; }
+
+        .toast { position: fixed; top: 20px; right: 20px; padding: 14px 22px; border-radius: 10px; color: #fff; font-size: 14px; z-index: 10000; animation: slideIn 0.3s ease; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
+        .toast.success { background: #27ae60; }
+        .toast.error { background: #e74c3c; }
+        .toast.info { background: #00b4d8; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         .auto-badge { background: #2ecc71; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; display: none; }
         .loading { text-align: center; padding: 60px; color: #8899a6; }
         .loading .spinner { border: 3px solid #253341; border-top: 3px solid #00b4d8; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 16px; }
@@ -134,6 +165,7 @@
                             <th style="text-align:right">Cost (USD)</th>
                             <th style="text-align:right">Usage Qty</th>
                             <th style="width:15%">Share</th>
+                            <th style="width:120px">Actions</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -407,7 +439,7 @@
         function renderResources(resources, total) {
             const tbody = document.querySelector('#resourceTable tbody');
             if (!resources || resources.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" style="color:#8899a6;text-align:center;padding:20px">No resource data available</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="10" style="color:#8899a6;text-align:center;padding:20px">No resource data available</td></tr>';
                 return;
             }
             tbody.innerHTML = resources.map((r, i) => {
@@ -416,8 +448,90 @@
                 const rid = (r.resource_name && r.resource_name !== 'N/A' && r.resource_name !== r.resource_id && r.resource_id !== 'N/A') ? `<br><span style="color:#8899a6;font-size:11px">${r.resource_id}</span>` : '';
                 const by = r.created_by || '<span style="color:#8899a6">-</span>';
                 const on = r.created_on || '<span style="color:#8899a6">-</span>';
-                return `<tr><td style="color:#8899a6">${i+1}</td><td>${name}${rid}</td><td>${r.service}</td><td>${r.compartment_name}</td><td style="font-size:12px">${by}</td><td style="font-size:12px">${on}</td><td class="cost" style="text-align:right">$${r.total_cost.toFixed(2)}</td><td style="text-align:right;color:#8899a6">${r.total_qty.toFixed(2)}</td><td class="bar-cell"><div class="bar-bg" style="width:${pct}%"></div><span style="position:relative">${pct}%</span></td></tr>`;
+                const ocid = r.resource_id || '';
+                const isCompute = ocid.includes('ocid1.instance.');
+                const isPsql = ocid.includes('ocid1.postgresqldbsystem.');
+                const isFw = ocid.includes('ocid1.networkfirewall.');
+                const isLb = ocid.includes('ocid1.loadbalancer.') || ocid.includes('ocid1.networkloadbalancer.');
+                const isVol = ocid.includes('ocid1.volume.');
+                const isVcn = ocid.includes('ocid1.vcn.');
+                const isSub = ocid.includes('ocid1.subnet.');
+                const isOke = ocid.includes('ocid1.containerengine.');
+
+                const canStart = isCompute;
+                const canStop = isCompute;
+                const canDelete = isCompute || isPsql || isFw || isLb || isVol || isVcn || isSub || isOke;
+
+                let actions = '';
+                if (ocid && ocid !== 'N/A') {
+                    actions = `<button class="action-btn start" onclick="confirmAction('start','${ocid}','${(r.resource_name||ocid).replace(/'/g,"\\'")}')" ${canStart?'':'disabled'} title="Start">Start</button>`;
+                    actions += `<button class="action-btn stop" onclick="confirmAction('stop','${ocid}','${(r.resource_name||ocid).replace(/'/g,"\\'")}')" ${canStop?'':'disabled'} title="Stop">Stop</button>`;
+                    actions += `<button class="action-btn delete" onclick="confirmAction('delete','${ocid}','${(r.resource_name||ocid).replace(/'/g,"\\'")}')" ${canDelete?'':'disabled'} title="Delete">Del</button>`;
+                } else {
+                    actions = '<span style="color:#536a7a">-</span>';
+                }
+                return `<tr><td style="color:#8899a6">${i+1}</td><td>${name}${rid}</td><td>${r.service}</td><td>${r.compartment_name}</td><td style="font-size:12px">${by}</td><td style="font-size:12px">${on}</td><td class="cost" style="text-align:right">$${r.total_cost.toFixed(2)}</td><td style="text-align:right;color:#8899a6">${r.total_qty.toFixed(2)}</td><td class="bar-cell"><div class="bar-bg" style="width:${pct}%"></div><span style="position:relative">${pct}%</span></td><td>${actions}</td></tr>`;
             }).join('');
+        }
+
+        function showToast(msg, type) {
+            const t = document.createElement('div');
+            t.className = 'toast ' + type;
+            t.textContent = msg;
+            document.body.appendChild(t);
+            setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; setTimeout(() => t.remove(), 300); }, 4000);
+        }
+
+        function confirmAction(action, resourceId, resourceName) {
+            const actionLabels = { start: 'Start', stop: 'Stop', delete: 'Delete' };
+            const actionBtnClass = { start: 'btn-start', stop: 'btn-stop', delete: 'btn-danger' };
+            const actionBtnText = { start: 'Start Resource', stop: 'Stop Resource', delete: 'Delete Permanently' };
+            const warn = action === 'delete'
+                ? '<p style="color:#e74c3c;font-weight:600;margin-bottom:4px">⚠ This action cannot be undone!</p>'
+                : '';
+
+            const overlay = document.createElement('div');
+            overlay.className = 'confirm-overlay';
+            overlay.innerHTML = `
+                <div class="confirm-box">
+                    <h3>${actionLabels[action]} Resource</h3>
+                    ${warn}
+                    <p>Are you sure you want to ${action.toLowerCase()} this resource?</p>
+                    <div class="res-id">${resourceName}<br><span style="color:#536a7a">${resourceId}</span></div>
+                    <div class="actions">
+                        <button class="btn-cancel" onclick="this.closest('.confirm-overlay').remove()">Cancel</button>
+                        <button class="${actionBtnClass[action]}" id="confirmBtn" onclick="executeAction('${action}','${resourceId}',this)">${actionBtnText[action]}</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+        }
+
+        async function executeAction(action, resourceId, btn) {
+            const origText = btn.textContent;
+            btn.textContent = 'Processing...';
+            btn.disabled = true;
+
+            try {
+                const resp = await fetch('/api/resource/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ resource_id: resourceId, action: action })
+                });
+                const data = await resp.json();
+                const overlay = btn.closest('.confirm-overlay');
+                if (overlay) overlay.remove();
+
+                if (data.success) {
+                    showToast(data.message, 'success');
+                    setTimeout(() => refreshData(false), 2000);
+                } else {
+                    showToast(data.message, 'error');
+                }
+            } catch (err) {
+                showToast('Request failed: ' + err.message, 'error');
+                btn.textContent = origText;
+                btn.disabled = false;
+            }
         }
 
         refreshData(false);
