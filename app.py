@@ -5,16 +5,32 @@ Flask app to visualize OCI cost data from Usage API.
 """
 
 import csv
+import hashlib
 import io
 import os
 import time as _time
 from datetime import datetime, timedelta
+from functools import wraps
 
 import oci
 import pandas as pd
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
 
 app = Flask(__name__)
+app.secret_key = os.urandom(32).hex()
+
+USERS = {
+    "admin": {
+        "password": hashlib.sha256("admin123".encode()).hexdigest(),
+        "role": "admin",
+        "display_name": "Administrator",
+    },
+    "viewer": {
+        "password": hashlib.sha256("viewer123".encode()).hexdigest(),
+        "role": "user",
+        "display_name": "Viewer",
+    },
+}
 
 _cache = {}
 
@@ -33,6 +49,61 @@ def _safe_float(val):
         return float(val or 0)
     except (ValueError, TypeError):
         return 0.0
+
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if "user" not in session:
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if "user" not in session:
+            return redirect(url_for("login"))
+        if session.get("role") != "admin":
+            return jsonify({"success": False, "message": "Admin access required"}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        hashed = hashlib.sha256(password.encode()).hexdigest()
+        user = USERS.get(username)
+        if user and user["password"] == hashed:
+            session["user"] = username
+            session["role"] = user["role"]
+            session["display_name"] = user["display_name"]
+            return redirect(url_for("index"))
+        error = "Invalid username or password"
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.route("/api/user")
+def api_user():
+    if "user" not in session:
+        return jsonify({"authenticated": False})
+    return jsonify({
+        "authenticated": True,
+        "username": session["user"],
+        "role": session["role"],
+        "display_name": session["display_name"],
+    })
 
 
 def fetch_cost_data(days=30, force=False):
@@ -283,11 +354,13 @@ def _service_compartment_matrix(df):
 
 
 @app.route("/")
+@login_required
 def index():
-    return render_template("index.html")
+    return render_template("index.html", user_role=session.get("role", "user"), display_name=session.get("display_name", "User"))
 
 
 @app.route("/api/data")
+@login_required
 def api_data():
     days = int(request.args.get("days", 30))
     force = request.args.get("force", "false").lower() == "true"
@@ -297,6 +370,7 @@ def api_data():
 
 
 @app.route("/api/export/csv")
+@login_required
 def export_csv():
     days = int(request.args.get("days", 30))
     days = min(max(days, 1), 365)
@@ -511,6 +585,7 @@ def _resource_action(resource_id, action):
 
 
 @app.route("/api/resource/action", methods=["POST"])
+@admin_required
 def api_resource_action():
     data = request.get_json()
     resource_id = data.get("resource_id", "")

@@ -11,6 +11,12 @@
         .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 20px 30px; border-bottom: 2px solid #00b4d8; }
         .header h1 { font-size: 24px; color: #00b4d8; display: inline; }
         .header .subtitle { color: #8899a6; font-size: 14px; margin-top: 4px; }
+        .header-row { display: flex; justify-content: space-between; align-items: flex-start; }
+        .user-bar { display: flex; align-items: center; gap: 12px; }
+        .user-badge { background: {{ 'rgba(0,180,216,0.15)' if user_role == 'admin' else 'rgba(136,153,166,0.15)' }}; border: 1px solid {{ '#00b4d8' if user_role == 'admin' else '#38444d' }}; color: {{ '#00b4d8' if user_role == 'admin' else '#8899a6' }}; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+        .user-name { color: #e1e8ed; font-size: 13px; }
+        .logout-btn { background: transparent; border: 1px solid #38444d; color: #8899a6; padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s; text-decoration: none; }
+        .logout-btn:hover { border-color: #e74c3c; color: #e74c3c; background: rgba(231,76,60,0.1); }
         .controls { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
         .controls select, .controls button { background: #253341; color: #e1e8ed; border: 1px solid #38444d; padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; }
         .controls button:hover { background: #00b4d8; color: #fff; }
@@ -88,8 +94,17 @@
 </head>
 <body>
     <div class="header">
-        <h1>OCI Cost Dashboard</h1>
-        <div class="subtitle">Oracle Cloud Infrastructure - Cost & Usage Reports</div>
+        <div class="header-row">
+            <div>
+                <h1>OCI Cost Dashboard</h1>
+                <div class="subtitle">Oracle Cloud Infrastructure - Cost & Usage Reports</div>
+            </div>
+            <div class="user-bar">
+                <span class="user-name">{{ display_name }}</span>
+                <span class="user-badge">{{ user_role }}</span>
+                <a href="/logout" class="logout-btn">Logout</a>
+            </div>
+        </div>
         <div class="controls">
             <select id="daysSelect">
                 <option value="1">Last 1 day</option>
@@ -165,7 +180,7 @@
                             <th style="text-align:right">Cost (USD)</th>
                             <th style="text-align:right">Usage Qty</th>
                             <th style="width:15%">Share</th>
-                            <th style="width:120px">Actions</th>
+                            {% if user_role == 'admin' %}<th style="width:120px">Actions</th>{% endif %}
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -202,6 +217,8 @@
         let pendingRequest = null;
 
         document.getElementById('daysSelect').addEventListener('change', () => refreshData(true));
+
+        const USER_ROLE = '{{ user_role }}';
 
         async function refreshData(force) {
             const days = document.getElementById('daysSelect').value;
@@ -438,8 +455,10 @@
 
         function renderResources(resources, total) {
             const tbody = document.querySelector('#resourceTable tbody');
+            const isAdmin = USER_ROLE === 'admin';
+            const colCount = isAdmin ? 10 : 9;
             if (!resources || resources.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="10" style="color:#8899a6;text-align:center;padding:20px">No resource data available</td></tr>';
+                tbody.innerHTML = `<tr><td colspan="${colCount}" style="color:#8899a6;text-align:center;padding:20px">No resource data available</td></tr>`;
                 return;
             }
             tbody.innerHTML = resources.map((r, i) => {
@@ -449,28 +468,32 @@
                 const by = r.created_by || '<span style="color:#8899a6">-</span>';
                 const on = r.created_on || '<span style="color:#8899a6">-</span>';
                 const ocid = r.resource_id || '';
-                const isCompute = ocid.includes('ocid1.instance.');
-                const isPsql = ocid.includes('ocid1.postgresqldbsystem.');
-                const isFw = ocid.includes('ocid1.networkfirewall.');
-                const isLb = ocid.includes('ocid1.loadbalancer.') || ocid.includes('ocid1.networkloadbalancer.');
-                const isVol = ocid.includes('ocid1.volume.');
-                const isVcn = ocid.includes('ocid1.vcn.');
-                const isSub = ocid.includes('ocid1.subnet.');
-                const isOke = ocid.includes('ocid1.containerengine.');
 
-                const canStart = isCompute;
-                const canStop = isCompute;
-                const canDelete = isCompute || isPsql || isFw || isLb || isVol || isVcn || isSub || isOke;
-
-                let actions = '';
-                if (ocid && ocid !== 'N/A') {
-                    actions = `<button class="action-btn start" onclick="confirmAction('start','${ocid}','${(r.resource_name||ocid).replace(/'/g,"\\'")}')" ${canStart?'':'disabled'} title="Start">Start</button>`;
-                    actions += `<button class="action-btn stop" onclick="confirmAction('stop','${ocid}','${(r.resource_name||ocid).replace(/'/g,"\\'")}')" ${canStop?'':'disabled'} title="Stop">Stop</button>`;
-                    actions += `<button class="action-btn delete" onclick="confirmAction('delete','${ocid}','${(r.resource_name||ocid).replace(/'/g,"\\'")}')" ${canDelete?'':'disabled'} title="Delete">Del</button>`;
-                } else {
-                    actions = '<span style="color:#536a7a">-</span>';
+                let actionsCell = '';
+                if (isAdmin) {
+                    const isCompute = ocid.includes('ocid1.instance.');
+                    const isPsql = ocid.includes('ocid1.postgresqldbsystem.');
+                    const isFw = ocid.includes('ocid1.networkfirewall.');
+                    const isLb = ocid.includes('ocid1.loadbalancer.') || ocid.includes('ocid1.networkloadbalancer.');
+                    const isVol = ocid.includes('ocid1.volume.');
+                    const isVcn = ocid.includes('ocid1.vcn.');
+                    const isSub = ocid.includes('ocid1.subnet.');
+                    const isOke = ocid.includes('ocid1.containerengine.');
+                    const canStart = isCompute;
+                    const canStop = isCompute;
+                    const canDelete = isCompute || isPsql || isFw || isLb || isVol || isVcn || isSub || isOke;
+                    if (ocid && ocid !== 'N/A') {
+                        const safeName = (r.resource_name||ocid).replace(/'/g,"\\'");
+                        actionsCell = `<button class="action-btn start" onclick="confirmAction('start','${ocid}','${safeName}')" ${canStart?'':'disabled'} title="Start">Start</button>`;
+                        actionsCell += `<button class="action-btn stop" onclick="confirmAction('stop','${ocid}','${safeName}')" ${canStop?'':'disabled'} title="Stop">Stop</button>`;
+                        actionsCell += `<button class="action-btn delete" onclick="confirmAction('delete','${ocid}','${safeName}')" ${canDelete?'':'disabled'} title="Delete">Del</button>`;
+                    } else {
+                        actionsCell = '<span style="color:#536a7a">-</span>';
+                    }
+                    actionsCell = `<td>${actionsCell}</td>`;
                 }
-                return `<tr><td style="color:#8899a6">${i+1}</td><td>${name}${rid}</td><td>${r.service}</td><td>${r.compartment_name}</td><td style="font-size:12px">${by}</td><td style="font-size:12px">${on}</td><td class="cost" style="text-align:right">$${r.total_cost.toFixed(2)}</td><td style="text-align:right;color:#8899a6">${r.total_qty.toFixed(2)}</td><td class="bar-cell"><div class="bar-bg" style="width:${pct}%"></div><span style="position:relative">${pct}%</span></td><td>${actions}</td></tr>`;
+
+                return `<tr><td style="color:#8899a6">${i+1}</td><td>${name}${rid}</td><td>${r.service}</td><td>${r.compartment_name}</td><td style="font-size:12px">${by}</td><td style="font-size:12px">${on}</td><td class="cost" style="text-align:right">$${r.total_cost.toFixed(2)}</td><td style="text-align:right;color:#8899a6">${r.total_qty.toFixed(2)}</td><td class="bar-cell"><div class="bar-bg" style="width:${pct}%"></div><span style="position:relative">${pct}%</span></td>${actionsCell}</tr>`;
             }).join('');
         }
 
