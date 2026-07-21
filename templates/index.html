@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCI Cost Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f1419; color: #e1e8ed; }
+        .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 20px 30px; border-bottom: 2px solid #00b4d8; }
+        .header h1 { font-size: 24px; color: #00b4d8; display: inline; }
+        .header .subtitle { color: #8899a6; font-size: 14px; margin-top: 4px; }
+        .controls { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+        .controls select, .controls button { background: #253341; color: #e1e8ed; border: 1px solid #38444d; padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+        .controls button:hover { background: #00b4d8; color: #fff; }
+        .controls button.active { background: #00b4d8; color: #fff; }
+        .controls button.danger { background: #e74c3c; }
+        .auto-badge { background: #2ecc71; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; display: none; }
+        .loading { text-align: center; padding: 60px; color: #8899a6; }
+        .loading .spinner { border: 3px solid #253341; border-top: 3px solid #00b4d8; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 16px; }
+        .loading-overlay { display: none; position: fixed; top: 70px; right: 30px; background: #00b4d8; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; z-index: 50; box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
+        .loading-overlay.show { display: flex; align-items: center; gap: 8px; }
+        .loading-overlay .mini-spinner { border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid #fff; border-radius: 50%; width: 16px; height: 16px; animation: spin 0.8s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; padding: 20px 30px; }
+        .kpi-card { background: #192734; border-radius: 12px; padding: 18px; border: 1px solid #253341; }
+        .kpi-card .label { color: #8899a6; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+        .kpi-card .value { font-size: 26px; font-weight: 700; color: #00b4d8; margin-top: 6px; }
+        .kpi-card .value.cost { color: #f39c12; }
+        .kpi-card .value.green { color: #2ecc71; }
+        .kpi-card .value.red { color: #e74c3c; }
+        .kpi-card .sub { color: #8899a6; font-size: 12px; margin-top: 4px; }
+        .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 0 30px 30px; }
+        .chart-card { background: #192734; border-radius: 12px; padding: 20px; border: 1px solid #253341; }
+        .chart-card h3 { color: #e1e8ed; font-size: 16px; margin-bottom: 16px; }
+        .chart-card canvas { max-height: 320px; }
+        .chart-card.full-width { grid-column: 1 / -1; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { text-align: left; color: #8899a6; padding: 10px 12px; border-bottom: 2px solid #253341; font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; cursor: pointer; user-select: none; }
+        th:hover { color: #00b4d8; }
+        td { padding: 10px 12px; border-bottom: 1px solid #253341; }
+        tr:hover td { background: #1c2e3f; }
+        tr.clickable { cursor: pointer; }
+        tr.clickable:hover td { background: #1c3a4f; }
+        .cost { color: #f39c12; font-weight: 600; }
+        .bar-cell { position: relative; }
+        .bar-bg { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(0, 180, 216, 0.1); border-radius: 2px; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: center; }
+        .modal-overlay.show { display: flex; }
+        .modal { background: #192734; border-radius: 12px; padding: 24px; max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto; border: 1px solid #00b4d8; }
+        .modal h3 { color: #00b4d8; margin-bottom: 16px; }
+        .modal-close { float: right; background: none; border: none; color: #8899a6; font-size: 24px; cursor: pointer; }
+        .modal-close:hover { color: #e74c3c; }
+        @media (max-width: 768px) { .charts-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>OCI Cost Dashboard</h1>
+        <div class="subtitle">Oracle Cloud Infrastructure - Cost & Usage Reports</div>
+        <div class="controls">
+            <select id="daysSelect">
+                <option value="1">Last 1 day</option>
+                <option value="7">Last 7 days</option>
+                <option value="14">Last 14 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="60">Last 60 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="180">Last 6 months</option>
+            </select>
+            <button onclick="refreshData(true)" title="Force refresh from OCI">Refresh</button>
+            <button id="autoBtn" onclick="toggleAuto()" title="Auto-refresh every 5 minutes">Auto-refresh: OFF</button>
+            <span id="autoBadge" class="auto-badge">LIVE</span>
+            <button onclick="exportCSV()" title="Download CSV">Export CSV</button>
+            <span id="lastUpdate" style="color:#8899a6;font-size:13px"></span>
+        </div>
+    </div>
+
+    <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <p>Loading cost data from OCI...</p>
+    </div>
+
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="mini-spinner"></div>
+        <span>Refreshing...</span>
+    </div>
+
+    <div id="dashboard" style="display:none">
+        <div class="kpi-row" id="kpiRow"></div>
+        <div class="charts-grid">
+            <div class="chart-card full-width">
+                <h3>Daily Cost Trend</h3>
+                <canvas id="dailyChart"></canvas>
+            </div>
+            <div class="chart-card full-width">
+                <h3>Monthly Cost Comparison</h3>
+                <canvas id="monthlyChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Cost by Service</h3>
+                <canvas id="serviceChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Cost by Compartment <span style="color:#8899a6;font-size:12px">(click to drill down)</span></h3>
+                <canvas id="compartmentChart"></canvas>
+            </div>
+            <div class="chart-card full-width">
+                <h3>Service & Compartment Breakdown</h3>
+                <table id="breakdownTable">
+                    <thead>
+                        <tr>
+                            <th>Service</th>
+                            <th>Compartment</th>
+                            <th style="text-align:right">Cost (USD)</th>
+                            <th style="width:35%">Share</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="chart-card full-width">
+                <h3>Top Cost-Generating Resources</h3>
+                <table id="resourceTable">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Resource Name</th>
+                            <th>Service</th>
+                            <th>Compartment</th>
+                            <th>Created By</th>
+                            <th>Created On</th>
+                            <th style="text-align:right">Cost (USD)</th>
+                            <th style="text-align:right">Usage Qty</th>
+                            <th style="width:15%">Share</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Compartment drill-down modal -->
+    <div class="modal-overlay" id="compModal">
+        <div class="modal">
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+            <h3 id="compModalTitle">Compartment Resources</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Resource</th>
+                        <th>Service</th>
+                        <th style="text-align:right">Cost (USD)</th>
+                        <th style="text-align:right">Usage Qty</th>
+                    </tr>
+                </thead>
+                <tbody id="compModalBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let dailyChart, serviceChart, compartmentChart, monthlyChart;
+        let autoInterval = null;
+        let cachedData = null;
+        const COLORS = ['#00b4d8','#f39c12','#e74c3c','#2ecc71','#9b59b6','#1abc9c','#e67e22','#3498db','#e91e63','#00bcd4','#ff9800','#8bc34a'];
+
+        let pendingRequest = null;
+
+        document.getElementById('daysSelect').addEventListener('change', () => refreshData(true));
+
+        async function refreshData(force) {
+            const days = document.getElementById('daysSelect').value;
+            const overlay = document.getElementById('loadingOverlay');
+            const initial = !cachedData;
+
+            // First load: show full spinner; subsequent: show overlay
+            if (initial) {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('dashboard').style.display = 'none';
+            } else {
+                overlay.classList.add('show');
+            }
+
+            try {
+                if (pendingRequest) pendingRequest.abort();
+                const controller = new AbortController();
+                pendingRequest = controller;
+
+                const resp = await fetch(`/api/data?days=${days}&force=${force}`, { signal: controller.signal });
+                const data = await resp.json();
+                cachedData = data;
+                renderDashboard(data);
+                document.getElementById('lastUpdate').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+            } catch(e) {
+                if (e.name !== 'AbortError') {
+                    if (!cachedData) {
+                        document.getElementById('loading').innerHTML = '<p style="color:#e74c3c">Error loading data. Is the Flask server running?</p>';
+                    }
+                }
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+                overlay.classList.remove('show');
+                pendingRequest = null;
+            }
+        }
+
+        function toggleAuto() {
+            const btn = document.getElementById('autoBtn');
+            const badge = document.getElementById('autoBadge');
+            if (autoInterval) {
+                clearInterval(autoInterval);
+                autoInterval = null;
+                btn.textContent = 'Auto-refresh: OFF';
+                btn.classList.remove('active');
+                badge.style.display = 'none';
+            } else {
+                autoInterval = setInterval(() => refreshData(true), 300000);
+                btn.textContent = 'Auto-refresh: ON';
+                btn.classList.add('active');
+                badge.style.display = 'inline';
+            }
+        }
+
+        function exportCSV() {
+            const days = document.getElementById('daysSelect').value;
+            window.location.href = `/api/export/csv?days=${days}`;
+        }
+
+        function renderDashboard(data) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'block';
+            renderKPIs(data.summary, data.forecast);
+            renderDailyChart(data.daily, data.forecast);
+            renderMonthlyChart(data.monthly_comparison);
+            renderServiceChart(data.by_service);
+            renderCompartmentChart(data.by_compartment, data.compartment_resources);
+            renderTable(data.by_service_compartment, data.summary.total_cost);
+            renderResources(data.top_resources, data.summary.total_cost);
+        }
+
+        function renderKPIs(s, f) {
+            let forecastHTML = '';
+            if (f && f.projected_total) {
+                const pct = s.total_cost > 0 ? ((f.projected_total / s.total_cost - 1) * 100).toFixed(0) : 0;
+                const cls = f.projected_total > s.total_cost ? 'red' : 'green';
+                forecastHTML = `
+                    <div class="kpi-card"><div class="label">Forecast (end of period)</div><div class="value ${cls}">$${f.projected_total.toLocaleString()}</div>
+                    <div class="sub">Daily avg: $${f.daily_avg.toFixed(2)}</div></div>`;
+            }
+            document.getElementById('kpiRow').innerHTML = `
+                <div class="kpi-card"><div class="label">Total Cost</div><div class="value cost">$${s.total_cost.toLocaleString()}</div></div>
+                <div class="kpi-card"><div class="label">Period</div><div class="value" style="font-size:15px">${s.period_start} to ${s.period_end}</div></div>
+                <div class="kpi-card"><div class="label">Services</div><div class="value">${s.services}</div></div>
+                <div class="kpi-card"><div class="label">Compartments</div><div class="value">${s.compartments}</div></div>
+                ${forecastHTML}
+                <div class="kpi-card"><div class="label">Records</div><div class="value">${s.total_records.toLocaleString()}</div></div>
+            `;
+        }
+
+        function renderDailyChart(daily, forecast) {
+            const ctx = document.getElementById('dailyChart').getContext('2d');
+            if (dailyChart) dailyChart.destroy();
+            const labels = daily.map(d => d.date);
+            const values = daily.map(d => d.cost);
+            if (forecast && forecast.projected_total && daily.length > 0) {
+                const avg = forecast.daily_avg;
+                const lastDate = new Date(daily[daily.length - 1].date);
+                for (let i = 1; i <= 7; i++) {
+                    const d = new Date(lastDate);
+                    d.setDate(d.getDate() + i);
+                    labels.push(d.toISOString().slice(0,10));
+                    values.push(null);
+                }
+                // Add forecast line
+                const forecastValues = new Array(daily.length).fill(null);
+                forecastValues[daily.length - 1] = daily[daily.length - 1].cost;
+                for (let i = 1; i <= 7; i++) {
+                    forecastValues.push(avg);
+                }
+                dailyChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            { label: 'Daily Cost', data: values, borderColor: '#00b4d8', backgroundColor: 'rgba(0,180,216,0.1)', fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2 },
+                            { label: 'Forecast', data: forecastValues, borderColor: '#e74c3c', borderDash: [5,5], fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2 }
+                        ]
+                    },
+                    options: chartOptions()
+                });
+            } else {
+                dailyChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{ label: 'Daily Cost (USD)', data: values, borderColor: '#00b4d8', backgroundColor: 'rgba(0,180,216,0.1)', fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2 }]
+                    },
+                    options: chartOptions()
+                });
+            }
+        }
+
+        function renderMonthlyChart(monthly) {
+            const ctx = document.getElementById('monthlyChart').getContext('2d');
+            if (monthlyChart) monthlyChart.destroy();
+            if (!monthly || monthly.length === 0) return;
+            monthlyChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: monthly.map(m => m.month),
+                    datasets: [{ label: 'Monthly Cost (USD)', data: monthly.map(m => m.cost), backgroundColor: COLORS, borderRadius: 4 }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: '#8899a6' }, grid: { color: '#253341' } },
+                        y: { ticks: { color: '#8899a6', callback: v => '$' + v.toLocaleString() }, grid: { color: '#253341' } }
+                    }
+                }
+            });
+        }
+
+        function renderServiceChart(services) {
+            const ctx = document.getElementById('serviceChart').getContext('2d');
+            if (serviceChart) serviceChart.destroy();
+            serviceChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: services.slice(0, 10).map(s => s.name),
+                    datasets: [{ data: services.slice(0, 10).map(s => s.cost), backgroundColor: COLORS, borderWidth: 0 }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'right', labels: { color: '#8899a6', font: { size: 11 }, padding: 8 } } } }
+            });
+        }
+
+        function renderCompartmentChart(compartments, compResources) {
+            const ctx = document.getElementById('compartmentChart').getContext('2d');
+            if (compartmentChart) compartmentChart.destroy();
+            const top = compartments.slice(0, 12);
+            compartmentChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: top.map(c => c.name),
+                    datasets: [{ data: top.map(c => c.cost), backgroundColor: COLORS, borderRadius: 4 }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    onClick: (evt, elements) => {
+                        if (elements.length > 0) {
+                            const idx = elements[0].index;
+                            const compName = top[idx].name;
+                            openCompModal(compName, compResources[compName] || []);
+                        }
+                    },
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: '#8899a6', callback: v => '$' + v }, grid: { color: '#253341' } },
+                        y: { ticks: { color: '#8899a6' }, grid: { display: false } }
+                    }
+                }
+            });
+        }
+
+        function openCompModal(name, resources) {
+            document.getElementById('compModalTitle').textContent = name + ' - Resources';
+            const tbody = document.getElementById('compModalBody');
+            if (!resources.length) {
+                tbody.innerHTML = '<tr><td colspan="4" style="color:#8899a6;text-align:center;padding:20px">No resource data available</td></tr>';
+            } else {
+                tbody.innerHTML = resources.map(r => `<tr>
+                    <td>${r.resource_name === 'N/A' ? '<span style="color:#8899a6">-</span>' : r.resource_name}<br><span style="color:#8899a6;font-size:11px">${r.resource_id}</span></td>
+                    <td>${r.service}</td>
+                    <td class="cost" style="text-align:right">$${r.cost.toFixed(2)}</td>
+                    <td style="text-align:right;color:#8899a6">${r.qty.toFixed(2)}</td>
+                </tr>`).join('');
+            }
+            document.getElementById('compModal').classList.add('show');
+        }
+
+        function closeModal() { document.getElementById('compModal').classList.remove('show'); }
+        document.getElementById('compModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+
+        function chartOptions() {
+            return {
+                responsive: true,
+                plugins: { legend: { labels: { color: '#8899a6' } } },
+                scales: {
+                    x: { ticks: { color: '#8899a6', maxTicksLimit: 15 }, grid: { color: '#253341' } },
+                    y: { ticks: { color: '#8899a6', callback: v => '$' + v }, grid: { color: '#253341' } }
+                }
+            };
+        }
+
+        function renderTable(items, total) {
+            const tbody = document.querySelector('#breakdownTable tbody');
+            tbody.innerHTML = items.map(i => {
+                const pct = total > 0 ? (i.computed_amount / total * 100).toFixed(1) : 0;
+                return `<tr><td>${i.service}</td><td>${i.compartment_name}</td><td class="cost" style="text-align:right">$${i.computed_amount.toFixed(2)}</td><td class="bar-cell"><div class="bar-bg" style="width:${pct}%"></div><span style="position:relative">${pct}%</span></td></tr>`;
+            }).join('');
+        }
+
+        function renderResources(resources, total) {
+            const tbody = document.querySelector('#resourceTable tbody');
+            if (!resources || resources.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="color:#8899a6;text-align:center;padding:20px">No resource data available</td></tr>';
+                return;
+            }
+            tbody.innerHTML = resources.map((r, i) => {
+                const pct = total > 0 ? (r.total_cost / total * 100).toFixed(1) : 0;
+                const name = (!r.resource_name || r.resource_name === 'N/A' || r.resource_name === r.resource_id) ? '<span style="color:#8899a6">' + (r.resource_id !== 'N/A' ? r.resource_id : '-') + '</span>' : r.resource_name;
+                const rid = (r.resource_name && r.resource_name !== 'N/A' && r.resource_name !== r.resource_id && r.resource_id !== 'N/A') ? `<br><span style="color:#8899a6;font-size:11px">${r.resource_id}</span>` : '';
+                const by = r.created_by || '<span style="color:#8899a6">-</span>';
+                const on = r.created_on || '<span style="color:#8899a6">-</span>';
+                return `<tr><td style="color:#8899a6">${i+1}</td><td>${name}${rid}</td><td>${r.service}</td><td>${r.compartment_name}</td><td style="font-size:12px">${by}</td><td style="font-size:12px">${on}</td><td class="cost" style="text-align:right">$${r.total_cost.toFixed(2)}</td><td style="text-align:right;color:#8899a6">${r.total_qty.toFixed(2)}</td><td class="bar-cell"><div class="bar-bg" style="width:${pct}%"></div><span style="position:relative">${pct}%</span></td></tr>`;
+            }).join('');
+        }
+
+        refreshData(false);
+    </script>
+</body>
+</html>

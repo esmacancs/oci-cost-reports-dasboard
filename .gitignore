@@ -1,0 +1,11 @@
+oci_config
+oci_api_key.pem
+output/
+__pycache__/
+*.pyc
+.env
+*.xlsx
+check_search.py
+check_modules.py
+check_output.py
+verify_cost.py
