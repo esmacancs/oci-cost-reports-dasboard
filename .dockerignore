@@ -1,0 +1,10 @@
+oci_config
+oci_api_key.pem
+output/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+Dockerfile
+docker-compose.yml
+*.md

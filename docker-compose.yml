@@ -1,0 +1,12 @@
+services:
+  dashboard:
+    build: .
+    container_name: oci-cost-dashboard
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./oci_config:/root/.oci/config:ro
+      - ./oci_api_key.pem:/root/.oci/oci_api_key.pem:ro
+    environment:
+      - FLASK_ENV=production
+    restart: unless-stopped

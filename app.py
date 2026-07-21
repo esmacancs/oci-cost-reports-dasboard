@@ -35,10 +35,16 @@ USERS = {
 _cache = {}
 
 
+_oci_config_path = os.environ.get(
+    "OCI_CONFIG_PATH",
+    os.path.join(os.path.dirname(__file__), "oci_config"),
+)
+
+
 def get_config():
     config = oci.config.from_file(
-        file_location="E:\\oci-cost-reports\\oci_config",
-        profile_name="DEFAULT"
+        file_location=_oci_config_path,
+        profile_name="DEFAULT",
     )
     oci.config.validate_config(config)
     return config
